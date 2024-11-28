@@ -157,7 +157,6 @@ void sigterm_handler()
 
 void print_game_screen(struct Coordinates bait_position, struct Coordinates* tail, int tail_length) {
     // printf("\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    printf("%d %d\n", tail[1].x, tail[1].y);
     for (int i = 0; i < GRID_SIZE; i++) {
         // printf("\t\t\t\t\t\t\t\t\t\t");
         for (int j = 0; j < GRID_SIZE; j++) {
