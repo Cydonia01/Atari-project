@@ -22,14 +22,14 @@ void sigterm_handler();
 void print_game_screen(struct Coordinates, struct Coordinates*, int);
 void run_game();
 struct Coordinates create_bait();
-void update_frame();
 char* change_direction(int);
 void reset_terminal_mode();
 void set_terminal_mode();
 int kbhit();
 int get_key();
-void update_position(char*);
-void grow_up(struct Coordinates*, int);
+void update_position(char*, struct Coordinates*, int);
+struct Coordinates find_next_position(char*);
+int at_border = 0;
 
 
 int main() {
@@ -44,14 +44,29 @@ int main() {
 void run_game() {
     set_terminal_mode();
     char* direction = "up";
-    struct Coordinates* tail = (struct Coordinates*) malloc(225 * sizeof(struct Coordinates));
+    struct Coordinates* tail = (struct Coordinates*) malloc(GRID_SIZE*GRID_SIZE * sizeof(struct Coordinates));
     int bait_eaten;
     head.x = GRID_SIZE / 2;
     head.y = GRID_SIZE / 2;
     struct Coordinates bait_position = create_bait();
     int tail_length = 0;
-    while (head.x == bait_position.x && head.y == bait_position.y) {
+    while (1) {
         bait_position = create_bait();
+        int overlap = 0;
+
+        if (head.x == bait_position.x && head.y == bait_position.y) {
+            overlap = 1;
+        }
+        
+        for (int i = 0; i < tail_length; i++) {
+            if (bait_position.x == tail[0].x && bait_position.y == tail[0].y) {
+                overlap = 1;
+            }
+        }
+        
+        if (!overlap) {
+            break;
+        }
     }
     while(1) {
         // system("clear");
@@ -72,10 +87,11 @@ void run_game() {
 
         if (head.x == bait_position.x && head.y == bait_position.y) {
             bait_position = create_bait();
-            grow_up(tail, tail_length);
             tail_length++;
         }
-        update_position(direction);
+        if (!at_border) {
+            update_position(direction, tail, tail_length);
+        }
         
         print_game_screen(bait_position, tail, tail_length);
         usleep(120000);
@@ -145,20 +161,23 @@ void print_game_screen(struct Coordinates bait_position, struct Coordinates* tai
     for (int i = 0; i < GRID_SIZE; i++) {
         // printf("\t\t\t\t\t\t\t\t\t\t");
         for (int j = 0; j < GRID_SIZE; j++) {
+            int tail_found = 0;
             if (i == head.x && j == head.y) {
                 printf("O ");
+                continue;
             }
-            else if (tail_length > 0) {
-                for (int k = 0; k < tail_length; k++) {
-                    if (i == tail[k].x && j == tail[k].y) {
-                        printf("# ");
-                    }
+            for (int k = 0; k < tail_length; k++) {
+                if (i == tail[k].x && j == tail[k].y) {
+                    printf("# ");
+                    tail_found = 1;
+                    break;
                 }
             }
-            else if (i == bait_position.x && j == bait_position.y) {
+            if (i == bait_position.x && j == bait_position.y) {
                 printf("X ");
+                continue;
             }
-            else {
+            if (!tail_found) {
                 printf(". ");
             }
         }
@@ -182,34 +201,55 @@ char* change_direction(int key) {
     if (key == 'd') {
         direction = "right";
     }
+    at_border = 0;
     return direction;
 }
 
-void update_position(char* direction) {
+void update_position(char* direction, struct Coordinates* tail, int tail_length) {
+    struct Coordinates next_position = find_next_position(direction);
+    if (next_position.x < 0 || next_position.x > GRID_SIZE - 1 || next_position.y < 0 || next_position.y > GRID_SIZE - 1) {
+        at_border = 1;
+    }
+    else {
+        at_border = 0;
+    }
+
+    int self_collision = 0;
+    for (int i = 0; i < tail_length; i++) {
+        if (next_position.x == tail[i].x && next_position.y == tail[i].y) {
+            self_collision = 1;
+        }
+    }
+    if (!at_border && !self_collision) {
+        for (int i = tail_length - 1; i > 0; i--) {
+            tail[i].x = tail[i - 1].x;
+            tail[i].y = tail[i - 1].y;
+        }
+        tail[0].x = head.x;
+        tail[0].y = head.y;
+        head.x = next_position.x;
+        head.y = next_position.y;
+    }
+}
+
+struct Coordinates find_next_position(char* direction) {
+    struct Coordinates next_position;
+    next_position.x = head.x;
+    next_position.y = head.y;
     if (strcmp(direction, "up") == 0) {
-        head.x -= 1;
+        next_position.x -= 1;
     }
     if (strcmp(direction, "down") == 0) {
-        head.x += 1;
+        next_position.x += 1;
+
     }
     if (strcmp(direction, "left") == 0) {
-        head.y -= 1;
+        next_position.y -= 1;
     }
     if (strcmp(direction, "right") == 0) {
-        head.y += 1;
+        next_position.y += 1;
     }
-    if (head.x < 0) {
-        head.x += 1;
-    }
-    if (head.x > GRID_SIZE - 1) {
-        head.x -= 1;
-    }
-    if (head.y < 0) {
-        head.y += 1;
-    }
-    if (head.y > GRID_SIZE - 1) {
-        head.y -= 1;
-    }
+    return next_position;
 }
 
 struct Coordinates create_bait() {
@@ -218,14 +258,4 @@ struct Coordinates create_bait() {
     int randY = rand() % 15;
     struct Coordinates bait_position = {randX, randY};
     return bait_position;
-}
-
-
-void grow_up(struct Coordinates* tail, int tail_length) {
-    for (int i = tail_length - 1; i > 0; i++) {
-        tail[i + 1].x = tail[i].x;
-        tail[i + 1].y = tail[i].y;
-    }
-    tail[0].x = head.x;
-    tail[0].y = head.y;
 }
