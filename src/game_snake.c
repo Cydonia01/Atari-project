@@ -8,7 +8,6 @@
 #include<fcntl.h>
 #include<sys/select.h>
 
-
 #define GRID_SIZE 15
 
 struct Coordinates {
@@ -16,93 +15,60 @@ struct Coordinates {
     int y;
 } head;
 
-volatile sig_atomic_t exit_code = 0;
-void sigint_handler();
-void sigterm_handler();
-void print_game_screen(struct Coordinates, struct Coordinates*, int);
-int run_game();
-struct Coordinates create_bait();
-void change_direction(int);
+struct termios orig_termios;
+
+// Function declarations
+void signal_handler();
 void reset_terminal_mode();
 void set_terminal_mode();
 int kbhit();
 int get_key();
-void update_position(char*, struct Coordinates*, int);
-struct Coordinates find_next_position(char*);
-int at_border = 0;
-char* direction = "up";
+void initialize_player();
+void handle_input();
+void create_bait(struct Coordinates*);
+void change_direction(int);
+struct Coordinates find_next_position();
+void update_position(struct Coordinates*);
+void check_bait_eaten(struct Coordinates*);
+void print_game_screen(struct Coordinates*);
 
+// Global variables
+int at_border;
+char* direction;
+int bait_eaten;
+struct Coordinates bait_position;
+int tail_length;
+int exited = 0;
 
 int main() {
-    signal(SIGINT, sigint_handler);
-    signal(SIGTERM, sigterm_handler);
-
-    int run_status = run_game();
-    if (run_status != 0) {
-        return run_status;
-    }
-    return 0;
-}
-
-int run_game() {
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
     set_terminal_mode();
-    struct Coordinates* tail = (struct Coordinates*) malloc(GRID_SIZE*GRID_SIZE * sizeof(struct Coordinates));
-    int bait_eaten;
-    head.x = GRID_SIZE / 2;
-    head.y = GRID_SIZE / 2;
-    struct Coordinates bait_position = create_bait();
-    int tail_length = 0;
-    while (1) {
-        bait_position = create_bait();
-        int overlap = 0;
 
-        if (head.x == bait_position.x && head.y == bait_position.y) {
-            overlap = 1;
-        }
+    struct Coordinates* tail = (struct Coordinates*) malloc(GRID_SIZE*GRID_SIZE * sizeof(struct Coordinates));
+    initialize_player();
+
+    create_bait(tail);        
+    while(1) {
+        printf("\033[1J\033[H\033[?25l");
         
-        for (int i = 0; i < tail_length; i++) {
-            if (bait_position.x == tail[0].x && bait_position.y == tail[0].y) {
-                overlap = 1;
-            }
-        }
-        
-        if (!overlap) {
+        handle_input();
+        if (exited == 1) {
             break;
         }
-    }
-    while(1) {
-        // system("clear");
-        printf("\033[1J\033[H\033[?25l");
-        bait_eaten = 0;
-        int key = get_key();
-        if (key != -1) {
-            if (key == 'q') {
-                break;
-            }
-            change_direction(key);
-        }
-
-        
-        if (exit_code != 0) {
-            return exit_code;
-        }
-
-        if (head.x == bait_position.x && head.y == bait_position.y) {
-            bait_position = create_bait();
-            tail_length++;
-        }
-        if (!at_border) {
-            update_position(direction, tail, tail_length);
-        }
-        
-        print_game_screen(bait_position, tail, tail_length);
+        update_position(tail);
+        check_bait_eaten(tail);
+        print_game_screen(tail);
         usleep(120000);
     }
+    // Deallocate the pointer to prevent memory leaks
+    free(tail);
 }
 
-struct termios orig_termios;
+void signal_handler() {
+    exited = 1;
+}
 
-// Function to restore terminal settings
 void reset_terminal_mode() {
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
 }
@@ -115,13 +81,9 @@ void set_terminal_mode() {
     tcgetattr(STDIN_FILENO, &orig_termios);
     atexit(reset_terminal_mode); // Ensure settings are restored on exit
 
-    // Copy original settings to modify
     new_termios = orig_termios;
-
-    // Set terminal to non-canonical mode and disable echo
     new_termios.c_lflag &= ~(ICANON | ECHO);
 
-    // Apply new settings
     tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
 }
 
@@ -145,89 +107,75 @@ int get_key() {
     return -1;
 }
 
-void sigint_handler()
-{
-    exit_code = 2;
+void handle_input() {
+    int key = get_key();
+    if (key != -1) {
+        if (key == 'q') {
+            exited = 1;
+        }
+        else {
+            change_direction(key);
+        }
+    }
 }
 
-void sigterm_handler()
-{
-    exit_code = 15;
+void initialize_player() {
+    head.x = GRID_SIZE / 2;
+    head.y = GRID_SIZE / 2;
+    direction = "up";
+    tail_length = 0;
+    bait_eaten = 0;
+    at_border = 0;
 }
 
-void print_game_screen(struct Coordinates bait_position, struct Coordinates* tail, int tail_length) {
-    // printf("\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    for (int i = 0; i < GRID_SIZE; i++) {
-        // printf("\t\t\t\t\t\t\t\t\t\t");
-        for (int j = 0; j < GRID_SIZE; j++) {
-            int tail_found = 0;
-            if (i == head.x && j == head.y) {
-                printf("O ");
+void create_bait(struct Coordinates* tail) {
+    srand(time(NULL));
+    while (1) {
+        int randX = rand() % 15;
+        int randY = rand() % 15;
+        bait_position.x = randX;
+        bait_position.y = randY;
+
+        // check if the bait is created at the position of the head
+        if (head.x == bait_position.x && head.y == bait_position.y) {
+            continue;
+        }
+        
+        // check if the bait is created at the position of the tail
+        for (int i = 0; i < tail_length; i++) {
+            if (bait_position.x == tail[i].x && bait_position.y == tail[i].y) {
                 continue;
-            }
-            for (int k = 0; k < tail_length; k++) {
-                if (i == tail[k].x && j == tail[k].y) {
-                    printf("# ");
-                    tail_found = 1;
-                    break;
-                }
-            }
-            if (i == bait_position.x && j == bait_position.y) {
-                printf("X ");
-                continue;
-            }
-            if (!tail_found) {
-                printf(". ");
             }
         }
-        printf("\n");
+        break;
     }
 }
 
 void change_direction(int key) {
     if (key == 'w') {
-        direction = "up";
+        if (strcmp(direction, "down") != 0) {
+            direction = "up";
+        }
     }
     if (key == 's') {
-        direction = "down";
+        if (strcmp(direction, "up") != 0) {
+            direction = "down";
+        }
     }
     if (key == 'a') {
-        direction = "left";
+        if (strcmp(direction, "right") != 0) {
+            direction = "left";
+        }
     }
     if (key == 'd') {
-        direction = "right";
+        if (strcmp(direction, "left") != 0) {
+            direction = "right";
+        }
     }
     at_border = 0;
 }
 
-void update_position(char* direction, struct Coordinates* tail, int tail_length) {
-    struct Coordinates next_position = find_next_position(direction);
-    if (next_position.x < 0 || next_position.x > GRID_SIZE - 1 || next_position.y < 0 || next_position.y > GRID_SIZE - 1) {
-        at_border = 1;
-    }
-    else {
-        at_border = 0;
-    }
-
-    int self_collision = 0;
-    for (int i = 0; i < tail_length; i++) {
-        if (next_position.x == tail[i].x && next_position.y == tail[i].y) {
-            self_collision = 1;
-        }
-    }
-    if (!at_border && !self_collision) {
-        for (int i = tail_length - 1; i > 0; i--) {
-            tail[i].x = tail[i - 1].x;
-            tail[i].y = tail[i - 1].y;
-        }
-        tail[0].x = head.x;
-        tail[0].y = head.y;
-        head.x = next_position.x;
-        head.y = next_position.y;
-    }
-}
-
-struct Coordinates find_next_position(char* direction) {
+struct Coordinates find_next_position() {
     struct Coordinates next_position;
     next_position.x = head.x;
     next_position.y = head.y;
@@ -247,10 +195,75 @@ struct Coordinates find_next_position(char* direction) {
     return next_position;
 }
 
-struct Coordinates create_bait() {
-    srand(time(NULL));
-    int randX = rand() % 15;
-    int randY = rand() % 15;
-    struct Coordinates bait_position = {randX, randY};
-    return bait_position;
+void update_position(struct Coordinates* tail) {
+        struct Coordinates next_position = find_next_position(direction);
+        if (next_position.x < 0 || next_position.x > GRID_SIZE - 1 || next_position.y < 0 || next_position.y > GRID_SIZE - 1) {
+            at_border = 1;
+        }
+
+        int self_collision = 0;
+        for (int i = 0; i < tail_length; i++) {
+            if (next_position.x == tail[i].x && next_position.y == tail[i].y) {
+                self_collision = 1;
+            }
+        }
+
+        // move snake if it not going into a border and not colliding with itself
+        if (!at_border && !self_collision) {
+            for (int i = tail_length - 1; i > 0; i--) {
+                tail[i].x = tail[i - 1].x;
+                tail[i].y = tail[i - 1].y;
+            }
+            tail[0].x = head.x;
+            tail[0].y = head.y;
+            head.x = next_position.x;
+            head.y = next_position.y;
+        }
+}
+
+void check_bait_eaten(struct Coordinates *tail) {
+    if (head.x == bait_position.x && head.y == bait_position.y) {
+        create_bait(tail);
+
+        if (tail_length > 0) {
+            tail[tail_length].x = tail[tail_length - 1].x;
+            tail[tail_length].y = tail[tail_length - 1].y;
+        } else {
+            tail[tail_length].x = head.x;
+            tail[tail_length].y = head.y;
+        }
+
+        tail_length++;
+    }
+}
+
+void print_game_screen(struct Coordinates *tail)
+{
+    for (int i = 0; i < GRID_SIZE; i++) {
+        for (int j = 0; j < GRID_SIZE; j++) {
+            int tail_found = 0;
+            if (i == head.x && j == head.y) {
+                printf("\033[93mO \033[0m");
+                continue;
+            }
+
+            for (int k = 0; k < tail_length; k++) {
+                if (i == tail[k].x && j == tail[k].y) {
+                    printf("\033[34m# \033[0m");
+                    tail_found = 1;
+                    break;
+                }
+            }
+
+            if (i == bait_position.x && j == bait_position.y) {
+                printf("\033[31mX \033[0m");
+                continue;
+            }
+            
+            if (!tail_found) {
+                printf(". ");
+            }
+        }
+        printf("\n");
+    }
 }

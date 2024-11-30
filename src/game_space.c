@@ -18,39 +18,86 @@ struct Entity {
     int alive;
 } bullet;
 
-volatile sig_atomic_t exit_code = 0;
-void sigint_handler();
-void sigterm_handler();
-void print_game_screen(struct Entity*);
-void run_game();
+struct termios orig_termios;
+
+
+// function declarations
+void signal_handler();
 void reset_terminal_mode();
 void set_terminal_mode();
 int kbhit();
 int get_key();
-void update_alien_position(struct Entity*, char*);
-void change_position(char);
+void initialize_game(struct Entity*);
+void handle_input();
 void shoot();
-void check_collision(struct Entity*);
 void update_bullet_position();
+void alien_shoot(struct Entity*, int*);
+void update_alien_bullet_position();
+void check_collision(struct Entity*);
+void change_position(char);
 void change_alien_position(struct Entity*, int*);
+void update_alien_position(struct Entity*, char*);
+void print_game_screen(struct Entity*);
 
-int player_pos = WIDTH / 2;
+// global variables
+int player_pos;
+int exited = 0;
+struct Entity alien_bullet;
 
 
 int main() {
-    signal(SIGINT, sigint_handler);
-    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
-    run_game();
+    set_terminal_mode();
+    
+    struct Entity *aliens = (struct Entity*) malloc(NUM_OF_ALIENS * (sizeof(struct Entity)));
+    int *alien_move_counter = (int*) malloc(sizeof(int));
+    *alien_move_counter = 0;
+    int *alien_bullet_counter = (int*) malloc(sizeof(int));
+    *alien_bullet_counter = 0;
 
+    initialize_game(aliens);
+
+    while(1) {
+        *alien_move_counter += 1;
+        *alien_bullet_counter += 1;
+        printf("\033[1J\033[H\033[?25l");
+
+        handle_input();
+
+        if (exited != 0) {
+            break;
+        }
+
+        if (bullet.alive == 1) {
+            update_bullet_position();
+            check_collision(aliens);
+        }
+        
+        alien_shoot(aliens, alien_bullet_counter);
+
+        if (alien_bullet.alive == 1) {
+            update_alien_bullet_position();
+        }
+
+        change_alien_position(aliens, alien_move_counter);
+        print_game_screen(aliens);
+
+        usleep(40000);
+    }
+
+    // Deallocate the pointers to prevent memory leaks
+    free(aliens);
+    free(alien_move_counter);
+    free(alien_bullet_counter);
     return 0;
 }
 
+void signal_handler() {
+    exited = 1;
+}
 
-
-struct termios orig_termios;
-
-// Function to restore terminal settings
 void reset_terminal_mode() {
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
 }
@@ -59,17 +106,12 @@ void reset_terminal_mode() {
 void set_terminal_mode() {
     struct termios new_termios;
 
-    // Save original terminal settings
     tcgetattr(STDIN_FILENO, &orig_termios);
     atexit(reset_terminal_mode); // Ensure settings are restored on exit
 
-    // Copy original settings to modify
     new_termios = orig_termios;
-
-    // Set terminal to non-canonical mode and disable echo
     new_termios.c_lflag &= ~(ICANON | ECHO);
 
-    // Apply new settings
     tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
 }
 
@@ -93,93 +135,80 @@ int get_key() {
     return -1;
 }
 
-void sigint_handler()
-{
-    printf("signal handled");
-    exit_code = 2;
-}
-
-void sigterm_handler()
-{
-    printf("process killed");
-    exit_code = 15;
-}
-
-void run_game() {
-    set_terminal_mode();
-    
-    struct Entity *aliens = (struct Entity*) malloc(NUM_OF_ALIENS * (sizeof(struct Entity)));
+void initialize_game(struct Entity* aliens) {
     int offset_x = 2;
     int offset_y = 3;
+    player_pos = WIDTH / 2;
     for (int i = 0; i < NUM_OF_ALIENS; i++) {
         aliens[i].x = (i / 6) + offset_x;
         aliens[i].y = ((i % 6) * 2) - ((i / 6) % 2) + 2 + offset_y;
         aliens[i].alive = 1;    
     }
-    int *counter = (int*) malloc(sizeof(int));
-    *counter = 0;
-    while(1) {
-        *counter += 1;
-        int game_over = 1;
-        printf("\033[1J\033[H\033[?25l");
-        int key = get_key();
-        if (key != -1) {
-            if (key == 'q') {
-                break;
-            }
-            else if (key == 'w') {
-                shoot();
-            }
-            else {
-                change_position(key);
-            }
+}
+
+void handle_input() {
+    int key = get_key();
+    if (key != -1) {
+        if (key == 'q') {
+            exited = 1;
         }
-
-        // if (exit_code != 0) {
-        //     return exit_code;
-        // }
-
-        if (bullet.alive == 1) {
-            update_bullet_position();
-            check_collision(aliens);
+        else if (key == 'w') {
+            shoot();
         }
-        change_alien_position(aliens, counter);
-        print_game_screen(aliens);
-
-        usleep(40000);
+        else {
+            change_position(key);
+        }
     }
 }
 
-void print_game_screen(struct Entity* aliens) {
-    // printf("\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    for (int i = 0; i < HEIGHT; i++) {
-        // printf("\t\t\t\t\t\t\t\t\t\t");
-        for (int j = 0; j < WIDTH; j++) {
-            int alien_exist = 0;
-            for (int k = 0; k < NUM_OF_ALIENS; k++) {
-                if (aliens[k].x == i && aliens[k].y == j && aliens[k].alive == 1) {
-                    printf("\u25BC");
-                    alien_exist = 1;
-                }
-            }
-            if (!alien_exist) {
-                if (i == HEIGHT - 1) {
-                    if(player_pos == j) {
-                        printf("\u25B2");
-                    }
-                    else {
-                        printf(" ");
-                    }
-                }
-                else if (bullet.alive == 1 && bullet.x == i && bullet.y == j) {
-                    printf("|");
-                }
-                else {
-                    printf(" ");
-                }
-            }
+void shoot() {
+    if (!bullet.alive) {
+        bullet.x = HEIGHT - 1;
+        bullet.y = player_pos;
+        bullet.alive = 1;
+    }
+}
+
+void update_bullet_position() {
+    bullet.x -= 1;
+    if (bullet.x < 0) {
+        bullet.alive = 0;
+    }
+}
+
+void alien_shoot(struct Entity* aliens, int* alien_bullet_counter) {
+    if (!alien_bullet.alive && *alien_bullet_counter == 36) {
+        int random_alien;
+        srand(time(NULL));
+        do {
+            random_alien = rand() % NUM_OF_ALIENS; 
+        } while (aliens[random_alien].alive == 0);
+
+        alien_bullet.x = aliens[random_alien].x + 1;
+        alien_bullet.y = aliens[random_alien].y;
+        alien_bullet.alive = 1;
+        *alien_bullet_counter = 0;
+    }
+}
+
+void update_alien_bullet_position() {
+    if (alien_bullet.alive) {
+        alien_bullet.x += 1;
+        if (alien_bullet.x >= HEIGHT) {
+            alien_bullet.alive = 0;
+        } else if (alien_bullet.x == HEIGHT - 1 && alien_bullet.y == player_pos) {
+            exited = 1; // if the bullet collides with the player, the game is over.
         }
-        printf("\n");
+    }
+}
+
+void check_collision(struct Entity* aliens) {
+    for (int i = 0; i < NUM_OF_ALIENS; i++) {
+        if (aliens[i].alive == 1 && aliens[i].x == bullet.x && aliens[i].y == bullet.y) {
+            aliens[i].alive = 0;
+            bullet.alive = 0;
+            break;
+        }
     }
 }
 
@@ -192,35 +221,35 @@ void change_position(char key) {
     }
 }
 
-void change_alien_position(struct Entity* aliens, int* counter) {
-    switch (*counter) {
-        case 25: // 32
-        case 50: // 64
-        case 225: // 320
-        case 250: // 352
+// Aliens move over time in a predefined sequence.
+void change_alien_position(struct Entity* aliens, int* alien_move_counter) {
+    switch (*alien_move_counter) {
+        case 25:
+        case 50:
+        case 225:
+        case 250:
             update_alien_position(aliens, "left");
-            if (*counter == 250) { // Reset counter when it reaches 352 (11 * 32)
-                *counter = 0;
+            if (*alien_move_counter == 250) {
+                *alien_move_counter = 0;
             }
             break;
 
-        case 75: // 96
+        case 75:
             update_alien_position(aliens, "up");
             break;
 
-        case 100: // 128
-        case 125: // 160
-        case 150: // 192
-        case 175: // 224
+        case 100:
+        case 125:
+        case 150:
+        case 175:
             update_alien_position(aliens, "right");
             break;
 
-        case 200: // 288
+        case 200:
             update_alien_position(aliens, "down");
             break;
 
         default:
-            // No action for other counter values
             break;
     }
 }
@@ -248,28 +277,39 @@ void update_alien_position(struct Entity* aliens, char* direction) {
     }
 }
 
-void shoot() {
-    if (!bullet.alive) {
-        bullet.x = HEIGHT - 1;
-        bullet.y = player_pos;
-        bullet.alive = 1;
-    }
-}
-
-void update_bullet_position() {
-    bullet.x -= 1;
-    if (bullet.x < 0) {
-        bullet.alive = 0;
-    }
-}
-
-void check_collision(struct Entity* aliens) {
-    for (int i = 0; i < NUM_OF_ALIENS; i++) {
-        // printf("alive: %d\nalienx: %d\n alieny: %d\nbulletx: %d\n bullety %d\n", aliens[i].alive, aliens[i].x, aliens[i].y, bullet.x, bullet.y);
-        if (aliens[i].alive == 1 && aliens[i].x == bullet.x && aliens[i].y == bullet.y) {
-            aliens[i].alive = 0;
-            bullet.alive = 0;
-            break;
+void print_game_screen(struct Entity* aliens) {
+    printf("______________________\n");
+    for (int i = 0; i < HEIGHT; i++) {
+        printf("|");
+        for (int j = 0; j < WIDTH; j++) {
+            int alien_exist = 0;
+            for (int k = 0; k < NUM_OF_ALIENS; k++) {
+                if (aliens[k].x == i && aliens[k].y == j && aliens[k].alive == 1) {
+                    printf("\033[32m\u25BC\033[0m");
+                    alien_exist = 1;
+                }
+            }
+            if (!alien_exist) {
+                if (i == HEIGHT - 1) {
+                    if(player_pos == j) {
+                        printf("\033[33m\u25B2\033[0m");
+                    }
+                    else {
+                        printf(" ");
+                    }
+                }
+                else if (bullet.alive == 1 && bullet.x == i && bullet.y == j) {
+                    printf("\033[31m|\033[0m");
+                }
+                else if (alien_bullet.alive && alien_bullet.x == i && alien_bullet.y == j) {
+                    printf("\033[31m|\033[0m");
+                }
+                else {
+                    printf(" ");
+                }
+            }
         }
+        printf("|\n");
     }
+    printf("----------------------\n");
 }

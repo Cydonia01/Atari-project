@@ -8,80 +8,68 @@
 #include<fcntl.h>
 #include<sys/select.h>
 
-
-#define GRID_SIZE 40
-#define NUM_OF_WALLS 10
+#define HEIGHT 20
+#define WIDTH  22
 
 struct Coordinates {
     int x;
     int y;
 } player;
 
-volatile sig_atomic_t exit_code = 0;
-void sigint_handler();
-void sigterm_handler();
-void print_game_screen(char[][GRID_SIZE]);
-int run_game();
-void create_walls(char[][GRID_SIZE]);
-void change_direction(int);
+struct termios orig_termios;
+
+// Function declarations
+void signal_handler();
 void reset_terminal_mode();
 void set_terminal_mode();
 int kbhit();
 int get_key();
-void update_position(char*, struct Coordinates*, int);
-struct Coordinates find_next_position(char*);
-int at_border = 0;
-char* direction = "up";
+void handle_input();
+void initialize_player();
+void create_walls();
+void change_direction(int);
+struct Coordinates find_next_position();
+void update_position();
+void print_game_screen();
 
+// Global variables
+char* direction;
+int moving;
+int won = 0;
+int exited = 0;
+int walls[HEIGHT][WIDTH] = {0};
 
 int main() {
-    signal(SIGINT, sigint_handler);
-    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+    
+    set_terminal_mode();
 
-    int run_status = run_game();
-    if (run_status != 0) {
-        return run_status;
+    initialize_player();
+    create_walls();
+    
+    while(1) {
+        printf("\033[1J\033[H\033[?25l");
+        
+        if (exited == 1) {
+            break;
+        }
+        
+        handle_input();
+        update_position(walls);
+        print_game_screen(walls);
+        if (won) {
+            usleep(400000);
+        }
+        usleep(40000);
     }
     return 0;
 }
 
-int run_game() {
-    set_terminal_mode();
-    player.x = GRID_SIZE / 2;
-    player.y = GRID_SIZE / 2;
-    char walls[GRID_SIZE][GRID_SIZE] = {0};
-    create_walls(walls);
-    while(1) {
-        // system("clear");
-        printf("\033[1J\033[H\033[?25l");
-        int key = get_key();
-        if (key != -1) {
-            if (key == 'q') {
-                break;
-            }
-            // change_direction(key);
-        }
-        
-        if (exit_code != 0) {
-            return exit_code;
-        }
-
-        // if (head.x == bait_position.x && head.y == bait_position.y) {
-        //     bait_position = create_bait();
-        //     tail_length++;
-        // }
-        // if (!at_border) {
-        //     update_position(direction, tail, tail_length);
-        // }
-        
-        print_game_screen(walls);
-        usleep(120000);
-    }
+void signal_handler() {
+    exited = 1;
 }
 
-struct termios orig_termios;
-
-// Function to restore terminal settings
 void reset_terminal_mode() {
     tcsetattr(STDIN_FILENO, TCSANOW, &orig_termios);
 }
@@ -94,13 +82,9 @@ void set_terminal_mode() {
     tcgetattr(STDIN_FILENO, &orig_termios);
     atexit(reset_terminal_mode); // Ensure settings are restored on exit
 
-    // Copy original settings to modify
     new_termios = orig_termios;
-
-    // Set terminal to non-canonical mode and disable echo
     new_termios.c_lflag &= ~(ICANON | ECHO);
 
-    // Apply new settings
     tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
 }
 
@@ -124,124 +108,144 @@ int get_key() {
     return -1;
 }
 
-void sigint_handler()
-{
-    exit_code = 2;
+void handle_input() {
+    int key = get_key();
+    if (key != -1) {
+        if (key == 'q') {
+            exited = 1;
+        }
+        change_direction(key);
+    }
 }
 
-void sigterm_handler()
-{
-    exit_code = 15;
+// reset player upon losing
+void initialize_player() {
+    player.x = 14;
+    player.y = 11;
+    moving = 0;
+    direction = "";
 }
 
-void print_game_screen(char walls[][GRID_SIZE]) {
-    // printf("\n\n\n\n\n\n\n\n\n\n\n\n\n");
-    for (int i = 0; i < GRID_SIZE; i++) {
-        // printf("\t\t\t\t\t\t\t\t\t\t");
-        for (int j = 0; j < GRID_SIZE; j++) {
-            if (walls[i][j] == '|') {
-                printf("| ");
-            }
-            else if (walls[i][j] == '_') {
-                if (walls[i][j + 1] == '_') {
-                    printf("__");
+void change_direction(int key) {
+    if (!moving) {
+        if (key == 'w') {
+            direction = "up";
+        }
+        if (key == 's') {
+            direction = "down";
+        }
+        if (key == 'a') {
+            direction = "left";
+        }
+        if (key == 'd') {
+            direction = "right";
+        }
+        moving = 1;
+    }
+}
+
+struct Coordinates find_next_position() {
+    struct Coordinates next_position;
+    next_position.x = player.x;
+    next_position.y = player.y;
+    if (strcmp(direction, "up") == 0) {
+        next_position.x -= 1;
+    }
+    if (strcmp(direction, "down") == 0) {
+        next_position.x += 1;
+
+    }
+    if (strcmp(direction, "left") == 0) {
+        next_position.y -= 1;
+    }
+    if (strcmp(direction, "right") == 0) {
+        next_position.y += 1;
+    }
+    return next_position;
+}
+
+// moves player until it touches a wall or loses the game
+void update_position() {
+    struct Coordinates next_position = find_next_position();
+    
+    // game boundaries check
+    if (next_position.x < 0 || next_position.x > HEIGHT - 1 || next_position.y < 0 || next_position.y > WIDTH - 1) {
+        initialize_player();
+    }
+    else {
+        // exit condition check
+        if (player.x == 2 && player.y == 3) {
+            moving = 0;
+            won = 1;
+            exited = 1;
+        }
+
+        // stops if hits a wall
+        else if (moving && walls[next_position.x][next_position.y] == 1) {
+            direction = "";
+            moving = 0;
+        }
+
+        // wall collision check
+        else {
+            player.x = next_position.x;
+            player.y = next_position.y;
+        }
+    }
+
+}
+
+// creates the predefined walls and exit
+void create_walls() {
+    walls[1][16]  = 1;
+    walls[2][10]  = 1;
+    walls[3][18]  = 1;
+    walls[4][11]  = 1;
+    walls[6][2]   = 1;
+    walls[7][17]  = 1;
+    walls[8][10]  = 1;
+    walls[9][3]   = 1;
+    walls[10][12] = 1;
+    walls[11][13] = 1;
+    walls[12][11] = 1;
+    walls[13][2]  = 1;
+    walls[14][9]  = 1;
+    walls[14][13] = 1;
+    walls[15][17] = 1;
+    walls[16][11] = 1;
+    walls[17][3]  = 1;
+    walls[18][16] = 1;
+    walls[2][3]   = 2; // exit
+}
+
+void print_game_screen() {
+    printf("________________________\n");
+    for (int i = 0; i < HEIGHT; i++) {
+        printf("|");
+        for (int j = 0; j < WIDTH; j++) {
+            if (player.x == i && player.y == j) {
+                if (won) {
+                    printf("\033[42m\033[1m+\033[0m");
                 }
                 else {
-                    printf("_ ");
+                    printf("\033[1m+\033[0m");
                 }
+                continue;
             }
-            else {
-                printf(". ");
+            if (walls[i][j] == 2) {
+                printf("\033[42m \033[0m");
+            }
+            if (walls[i][j] == 1) {
+                printf("\033[43m \033[0m");
+            }
+            if (walls[i][j] == 0) {
+                printf(" ");
+            }
+            if (j == WIDTH - 1) {
+                printf("|");
             }
         }
         printf("\n");
     }
-}
-
-// void change_direction(int key) {
-//     if (key == 'w') {
-//         direction = "up";
-//     }
-//     if (key == 's') {
-//         direction = "down";
-//     }
-//     if (key == 'a') {
-//         direction = "left";
-//     }
-//     if (key == 'd') {
-//         direction = "right";
-//     }
-//     at_border = 0;
-// }
-
-// void update_position(char* direction, struct Coordinates* tail, int tail_length) {
-//     struct Coordinates next_position = find_next_position(direction);
-//     if (next_position.x < 0 || next_position.x > GRID_SIZE - 1 || next_position.y < 0 || next_position.y > GRID_SIZE - 1) {
-//         at_border = 1;
-//     }
-//     else {
-//         at_border = 0;
-//     }
-
-//     int self_collision = 0;
-//     for (int i = 0; i < tail_length; i++) {
-//         if (next_position.x == tail[i].x && next_position.y == tail[i].y) {
-//             self_collision = 1;
-//         }
-//     }
-//     if (!at_border && !self_collision) {
-//         for (int i = tail_length - 1; i > 0; i--) {
-//             tail[i].x = tail[i - 1].x;
-//             tail[i].y = tail[i - 1].y;
-//         }
-//         tail[0].x = head.x;
-//         tail[0].y = head.y;
-//         head.x = next_position.x;
-//         head.y = next_position.y;
-//     }
-// }
-
-// struct Coordinates find_next_position(char* direction) {
-//     struct Coordinates next_position;
-//     next_position.x = head.x;
-//     next_position.y = head.y;
-//     if (strcmp(direction, "up") == 0) {
-//         next_position.x -= 1;
-//     }
-//     if (strcmp(direction, "down") == 0) {
-//         next_position.x += 1;
-
-//     }
-//     if (strcmp(direction, "left") == 0) {
-//         next_position.y -= 1;
-//     }
-//     if (strcmp(direction, "right") == 0) {
-//         next_position.y += 1;
-//     }
-//     return next_position;
-// }
-
-void create_walls(char walls[][GRID_SIZE]) {
-    srand(time(NULL));
-    for (int i = 0; i < NUM_OF_WALLS; i++) {
-        int length = rand() % 15 + 1;
-        int randX = rand() % GRID_SIZE;
-        int randY = rand() % GRID_SIZE;
-        int direction = rand() % 2;
-        if (direction == 0) { // hotizontal
-            if (randY + length > GRID_SIZE) {
-                length = GRID_SIZE - randY;
-            }
-            for (int j = 0; j < length; j++) {
-                walls[randX][randY + j] = '_';
-            }
-        } else { // vertical
-            if (randX + length > GRID_SIZE) {
-                length = GRID_SIZE - randX;
-            }
-            for (int j = 0; j < length; j++) {
-                walls[randX + j][randY] = '|';
-            }
-        }
-    }
+    printf("------------------------\n");
 }
