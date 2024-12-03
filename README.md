@@ -53,7 +53,7 @@ cd bin
 ```
 
 ## Scripts
-- initialize.sh: Creates the virtual disk image. Overwrites existing images.
-- startup.sh: Mounts the virtual disk image, creates a symbolic link to the device file, and prepares the environment.
-- terminate.sh: Unmounts the virtual disk image, detaches the device file, and removes the symbolic link.
-- purge.sh: Does the same as terminate.sh, but also deletes the virtual disk image.
+- **initialize.sh**: Creates the virtual disk image. Overwrites existing images.
+- **startup.sh**: Mounts the virtual disk image, creates a symbolic link to the device file, and prepares the environment.
+- **terminate**.sh: Unmounts the virtual disk image, detaches the device file, and removes the symbolic link.
+- **purge.sh**: Does the same things as in **terminate.sh**, but also deletes the virtual disk image.
