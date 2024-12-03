@@ -195,7 +195,7 @@ void print_game_screen() {
     for (int i = 0; i < 4; i++) {
         printf("|\t\t\t\t\t\t\t\t\t\t\t\t\t   |\n");
     }
-    printf("|\t\t\t\t\tWelcome to ALEYSTATION\t\t\t\t\t\t   |\n|\t\t\t\t\t Press space to start\t\t\t\t\t\t   |\n");
+    printf("|\t\t\t\t\tWelcome to ALEYSTATION\t\t\t\t\t\t   |\n|\t\t\t\t\t Press enter to start\t\t\t\t\t\t   |\n");
     printf("|\t\t\t\t\t\t\t\t\t\t\t\t\t   |\n");
     printf("|                                 ");
     for (int i = 0; i < 2; i++) {
