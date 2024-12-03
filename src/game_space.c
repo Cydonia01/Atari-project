@@ -31,6 +31,7 @@ void initialize_game(struct Entity*);
 void handle_input();
 void shoot();
 void update_bullet_position();
+void check_game_over(struct Entity*);
 void alien_shoot(struct Entity*, int*);
 void update_alien_bullet_position();
 void check_collision(struct Entity*);
@@ -74,7 +75,8 @@ int main() {
             update_bullet_position();
             check_collision(aliens);
         }
-        
+
+        check_game_over(aliens);
         alien_shoot(aliens, alien_bullet_counter);
 
         if (alien_bullet.alive == 1) {
@@ -176,8 +178,20 @@ void update_bullet_position() {
     }
 }
 
+void check_game_over(struct Entity* aliens) {
+    int all_dead = 1;
+    for (int i = 0; i < NUM_OF_ALIENS; i++)  {
+        if (aliens[i].alive == 1) {
+            all_dead = 0;
+        }
+    }
+    if (all_dead) {
+        exited = 1;
+    }
+}
+
 void alien_shoot(struct Entity* aliens, int* alien_bullet_counter) {
-    if (!alien_bullet.alive && *alien_bullet_counter == 36) {
+    if (!alien_bullet.alive && *alien_bullet_counter == 36 && !exited) {
         int random_alien;
         srand(time(NULL));
         do {
