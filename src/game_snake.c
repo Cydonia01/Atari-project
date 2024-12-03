@@ -142,10 +142,15 @@ void create_bait(struct Coordinates* tail) {
         }
         
         // check if the bait is created at the position of the tail
+        int bait_in_tail = 0;
         for (int i = 0; i < tail_length; i++) {
             if (bait_position.x == tail[i].x && bait_position.y == tail[i].y) {
-                continue;
+                bait_in_tail = 1;
+                break;
             }
+        }
+        if (bait_in_tail) {
+            continue;
         }
         break;
     }
